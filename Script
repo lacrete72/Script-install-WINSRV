@@ -1,0 +1,77 @@
+$user = "Administrateur"
+$pwd = ConvertTo-SecureString "Ekod2025*" -AsPlainText -Force
+$credlocal = New-Object System.Management.Automation.PSCredential($user,$pwd)
+$ipserveur="192.168.1.152"
+
+$computername="SRVAD"
+$ipserver="192.168.1.1"
+
+$domain="Pierre.lan"
+$netbiosname="pierre"
+$dhcpname="dhcppierre"
+
+$userdomain = "$netbiosname\Administrateur"
+$creddomain = New-Object System.Management.Automation.PSCredential($userdomain,$pwd)
+
+#Changement de nom du SRV plus fixation de l'ip
+```
+Invoke-Command -ComputerName $ipserveur -Credential $credlocal -ScriptBlock {
+Param($computername, $ipserver)
+```
+#fixation de l'ip et disable ipv6
+```
+Disable-NetAdapterBinding -Name Ethernet -ComponentID ms_tcpip6
+New-NetIPAddress -InterfaceAlias Ethernet -IPAddress $ipserver -AddressFamily ipv4 -DefaultGateway 192.168.1.254 -PrefixLength 24
+```
+
+#renommage du poste
+```
+Rename-Computer -NewName $computername -Restart
+} -AsJob -ArgumentList $computername, $ipserver
+
+Start-Sleep -Seconds 30
+```
+# installation des rôles plus promotion en DC
+```
+Invoke-Command -ComputerName $ipserver -Credential $credlocal -ScriptBlock {
+Param($domain, $netbiosname)
+```
+#installation des rôles
+```
+Install-WindowsFeature -Name AD-Domain-Services, DNS, DHCP -IncludeManagementTools
+```
+#création de la forêt
+```
+Install-ADDSForest -DomainName $domain -DomainNetbiosName $netbiosname -SafeModeAdministratorPassword (ConvertTo-SecureString "Ekod2025*" -AsPlainText -Force) -Force
+
+} -ArgumentList $domain, $netbiosname
+
+Read-Host "Appuyer sur ENTREE pour continuer...."
+```
+#ajout des OU et des USERS
+```
+Invoke-Command -ComputerName $ipserver -Credential $creddomain -ScriptBlock {
+Param($dhcpname)
+
+```
+#configuration DNS
+```
+Add-DnsServerForwarder -IPAddress 8.8.8.8
+```
+#configuration DHCP
+```
+Add-DhcpServerInDC
+Add-DhcpServerv4Scope -name $dhcpname -StartRange 192.168.1.50 -EndRange 192.168.1.100 -SubnetMask 255.255.255.0 -State Active
+Set-DhcpServerv4OptionValue -ScopeId 192.168.1.0 -OptionId 3 -Value 192.168.1.254
+Set-DhcpServerv4OptionValue -DnsServer 192.168.1.1
+Set-ItemProperty –Path registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\ServerManager\\Roles\\12 –Name ConfigurationState –Value 2 #supprime le message notification sur le gestionnaire serveur
+```
+#création d'une OU
+```
+New-ADOrganizationalUnit -name "utilisateurs" -Path "DC=pierre, DC=lan"
+```
+#création d'un user
+```
+New-ADUser -name "ewald"
+``
+```
